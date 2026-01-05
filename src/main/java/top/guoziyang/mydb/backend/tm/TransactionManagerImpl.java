@@ -11,6 +11,12 @@ import top.guoziyang.mydb.backend.utils.Panic;
 import top.guoziyang.mydb.backend.utils.Parser;
 import top.guoziyang.mydb.common.Error;
 
+/**
+ *  每一个事务都有一个 XID，这个 ID 唯一标识了这个事务。事务的 XID 从 1 开始标号，并自增，
+ *  不可重复。并特殊规定 XID 0 是一个超级事务（Super Transaction）。
+ *  当一些操作想在没有申请事务的情况下进行，那么可以将操作的 XID 设置为 0。
+ *   XID 为 0 的事务的状态永远是 committed
+ */
 public class TransactionManagerImpl implements TransactionManager {
 
     // XID文件头长度
@@ -19,19 +25,19 @@ public class TransactionManagerImpl implements TransactionManager {
     private static final int XID_FIELD_SIZE = 1;
 
     // 事务的三种状态
-    private static final byte FIELD_TRAN_ACTIVE   = 0;
-	private static final byte FIELD_TRAN_COMMITTED = 1;
-	private static final byte FIELD_TRAN_ABORTED  = 2;
+    private static final byte FIELD_TRAN_ACTIVE = 0;
+    private static final byte FIELD_TRAN_COMMITTED = 1;
+    private static final byte FIELD_TRAN_ABORTED = 2;
 
     // 超级事务，永远为commited状态
     public static final long SUPER_XID = 0;
 
     static final String XID_SUFFIX = ".xid";
-    
-    private RandomAccessFile file;
-    private FileChannel fc;
+
+    private final RandomAccessFile file;
+    private final FileChannel fc;
     private long xidCounter;
-    private Lock counterLock;
+    private final Lock counterLock;
 
     TransactionManagerImpl(RandomAccessFile raf, FileChannel fc) {
         this.file = raf;
@@ -42,7 +48,7 @@ public class TransactionManagerImpl implements TransactionManager {
 
     /**
      * 检查XID文件是否合法
-     * 读取XID_FILE_HEADER中的xidcounter，根据它计算文件的理论长度，对比实际长度
+     * 读取XID_FILE_HEADER中的xidCounter，根据它计算文件的理论长度，对比实际长度
      */
     private void checkXIDCounter() {
         long fileLen = 0;
@@ -51,7 +57,7 @@ public class TransactionManagerImpl implements TransactionManager {
         } catch (IOException e1) {
             Panic.panic(Error.BadXIDFileException);
         }
-        if(fileLen < LEN_XID_HEADER_LENGTH) {
+        if (fileLen < LEN_XID_HEADER_LENGTH) {
             Panic.panic(Error.BadXIDFileException);
         }
 
@@ -64,14 +70,19 @@ public class TransactionManagerImpl implements TransactionManager {
         }
         this.xidCounter = Parser.parseLong(buf.array());
         long end = getXidPosition(this.xidCounter + 1);
-        if(end != fileLen) {
+        if (end != fileLen) {
             Panic.panic(Error.BadXIDFileException);
         }
     }
 
+
+    // xid文件记录各个事务的状态,: 8个字节的文件头 + 后续每个事务的xid占一个字节
+    // 文件头8个字节记录了这个 XID 文件管理的事务的个数
+    // - - - - - - - - 1 2 3 4
+    // 0 1 2 3 4 5 6 7 8 9 10 11
     // 根据事务xid取得其在xid文件中对应的位置
     private long getXidPosition(long xid) {
-        return LEN_XID_HEADER_LENGTH + (xid-1)*XID_FIELD_SIZE;
+        return LEN_XID_HEADER_LENGTH + (xid - 1) * XID_FIELD_SIZE;
     }
 
     // 更新xid事务的状态为status
@@ -95,7 +106,7 @@ public class TransactionManagerImpl implements TransactionManager {
 
     // 将XID加一，并更新XID Header
     private void incrXIDCounter() {
-        xidCounter ++;
+        xidCounter++;
         ByteBuffer buf = ByteBuffer.wrap(Parser.long2Byte(xidCounter));
         try {
             fc.position(0);
@@ -147,17 +158,17 @@ public class TransactionManagerImpl implements TransactionManager {
     }
 
     public boolean isActive(long xid) {
-        if(xid == SUPER_XID) return false;
+        if (xid == SUPER_XID) return false;
         return checkXID(xid, FIELD_TRAN_ACTIVE);
     }
 
     public boolean isCommitted(long xid) {
-        if(xid == SUPER_XID) return true;
+        if (xid == SUPER_XID) return true;
         return checkXID(xid, FIELD_TRAN_COMMITTED);
     }
 
     public boolean isAborted(long xid) {
-        if(xid == SUPER_XID) return false;
+        if (xid == SUPER_XID) return false;
         return checkXID(xid, FIELD_TRAN_ABORTED);
     }
 
